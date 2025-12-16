@@ -1,0 +1,979 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>SDS Extractor</title>
+
+  <!-- pdf.js local (même dossier) -->
+  <script src="pdf.min.js"></script>
+  <script>
+    // Essaie de récupérer pdfjsLib depuis le bundle pdf.min.js
+    window.pdfjsLib = window['pdfjs-dist/build/pdf'] || window.pdfjsLib;
+    if (window.pdfjsLib) {
+      pdfjsLib.disableWorker = true;
+      try { pdfjsLib.GlobalWorkerOptions.workerSrc = null; } catch(e) {}
+      try { pdfjsLib.GlobalWorkerOptions.workerPort = null; } catch(e) {}
+    }
+  </script>
+
+  <style>
+    :root { --bg:#0b0f1a; --fg:#eee; --muted:#9aa4c2; --accent:#7aa2ff; --card:#0e1324; --line:#2b3250; }
+    * { box-sizing: border-box; }
+    body { background:var(--bg); color:var(--fg); font-family:system-ui,Segoe UI,Roboto,Ubuntu,sans-serif; }
+    h1 { text-align:center; margin:18px 0 16px; }
+    .wrap { max-width:1200px; margin:0 auto; padding:0 12px 32px; }
+
+    /* ---------- Layout main ---------- */
+    .layout {
+      display:flex;
+      gap:24px;
+      align-items:flex-start;
+    }
+    .info-panel {
+      flex:0 0 270px;
+      background:linear-gradient(145deg,#151a2b,#0c101d);
+      border-radius:18px;
+      border:1px solid #2b3250;
+      padding:16px 16px 20px;
+      box-shadow:0 18px 35px rgba(0,0,0,0.45);
+    }
+    .app-panel {
+      flex:1;
+    }
+
+    /* ---------- Info panel / comic style ---------- */
+    .info-header {
+      display:flex;
+      align-items:center;
+      gap:12px;
+      margin-bottom:10px;
+    }
+    .info-title {
+      font-weight:600;
+      font-size:16px;
+    }
+    .info-sub {
+      font-size:12px;
+      color:var(--muted);
+      margin-bottom:10px;
+    }
+
+    .bulb-icon-wrap {
+      width:42px;
+      height:42px;
+      border-radius:50%;
+      background:radial-gradient(circle at 30% 20%, #fff7c2, #ffd94a 45%, #b98900 90%);
+      display:flex;
+      align-items:center;
+      justify-content:center;
+      box-shadow:0 0 16px rgba(255,224,102,0.9);
+      flex-shrink:0;
+    }
+    .bulb-icon {
+      width:26px;
+      height:26px;
+      fill:#4a3a00;
+    }
+
+    .steps {
+      display:flex;
+      flex-direction:column;
+      gap:10px;
+      margin-top:4px;
+    }
+    .step-card {
+      position:relative;
+      background:#0b101f;
+      border:2px solid #f5f5f5;
+      border-radius:12px;
+      padding:10px 10px 10px 12px;
+      box-shadow:4px 4px 0 #111, 0 0 0 2px #000;
+      display:flex;
+      gap:10px;
+      align-items:flex-start;
+    }
+    .step-card:nth-child(2) { transform:rotate(-1deg); }
+    .step-card:nth-child(3) { transform:rotate(0.8deg); }
+    .step-number {
+      font-weight:800;
+      font-size:18px;
+      min-width:26px;
+      height:26px;
+      border-radius:6px;
+      background:#ffd94a;
+      color:#322100;
+      display:flex;
+      align-items:center;
+      justify-content:center;
+      box-shadow:0 2px 0 #b58a08;
+      margin-top:2px;
+    }
+    .step-texts { font-size:13px; line-height:1.35; }
+    .step-title { font-weight:600; margin-bottom:2px; }
+    .step-detail { color:var(--muted); font-size:12px; }
+
+    .step-picto {
+      position:absolute;
+      right:6px;
+      bottom:4px;
+      opacity:0.9;
+      font-size:10px;
+      text-transform:uppercase;
+      letter-spacing:0.06em;
+      padding:2px 6px;
+      border-radius:999px;
+      border:1px solid rgba(255,255,255,0.16);
+      background:rgba(8,10,20,0.9);
+      color:#f8f8f8;
+    }
+
+    .row { display:flex; gap:10px; justify-content:center; flex-wrap:wrap; margin:8px 0; }
+    .drop { border:2px dashed #666; border-radius:10px; padding:16px; text-align:center; margin:0 0 12px; }
+    .btn { background:#222; border:1px solid #555; color:#fff; padding:8px 12px; border-radius:8px; cursor:pointer; }
+    .btn:hover { background:#2b2b2b; }
+    .tabs .btn{ opacity:.9 }
+    .tabs .btn.active{ outline:2px solid var(--accent); opacity:1 }
+    .small { color:var(--muted); font-size:12px; text-align:center; }
+    table { width:100%; border-collapse:collapse; margin-top:12px; font-size:14px; }
+    th,td { border:1px solid #444; padding:6px 8px; vertical-align:top; text-align:left; }
+    th { background:#1b1f2f; position:sticky; top:0; z-index:5; }
+    td[contenteditable] { background:rgba(255,255,255,0.03); outline:none; }
+    a.link { color:var(--accent); }
+    .log { background:var(--card); border:1px solid var(--line); border-radius:8px; padding:8px; white-space:pre-wrap; min-height:38px; margin-top:10px; }
+    .need { box-shadow: inset 0 0 0 2px #ffbb00; background:rgba(255,187,0,0.08); }
+
+    .cmr { background: rgba(255, 0, 0, 0.15) !important; }
+    .archived-row { filter: grayscale(30%); opacity: .85; }
+
+    /* submitted visual */
+    .submitted-row {
+      opacity: 0.6;
+      background: rgba(255,255,255,0.03);
+    }
+
+    /* selects in table */
+    select.smallsel, select.locsel {
+      background:#141828;
+      color:var(--fg);
+      border:1px solid #444;
+      border-radius:6px;
+      font-size:12px;
+      padding:2px 4px;
+      max-width:180px;
+    }
+
+    /* Responsive */
+    @media (max-width: 900px) {
+      .layout { flex-direction:column; }
+      .info-panel { width:100%; order:-1; }
+    }
+  </style>
+</head>
+<body>
+<div class="wrap">
+  <h1>SDS Extractor</h1>
+
+  <div class="layout">
+    <!-- LEFT: Comic-style instructions -->
+    <aside class="info-panel">
+      <div class="info-header">
+        <div class="bulb-icon-wrap">
+          <!-- Simple light bulb -->
+          <svg class="bulb-icon" viewBox="0 0 64 64" aria-hidden="true">
+            <path d="M32 6c-9 0-16 7.3-16 16.2 0 5.4 2.7 10.2 7.1 13.2 1 .7 1.7 1.8 1.9 3l.6 4.4h12.7l.6-4.4c.2-1.2.9-2.3 1.9-3 4.4-3 7.1-7.8 7.1-13.2C48 13.3 41 6 32 6zM24 50c0 1.1.9 2 2 2h12a2 2 0 0 0 0-4H26a2 2 0 0 0-2 2zm3 6c0 1.1.9 2 2 2h6a2 2 0 1 0 0-4h-6a2 2 0 0 0-2 2z"/>
+          </svg>
+        </div>
+        <div>
+          <div class="info-title">How to order a chemical</div>
+          <div class="info-sub">Follow the 3 steps, no admin needed to submit.</div>
+        </div>
+      </div>
+
+      <div class="steps">
+        <!-- Step 1 -->
+        <div class="step-card">
+          <div class="step-number">1</div>
+          <div class="step-texts">
+            <div class="step-title">Choose SDS PDF & Process</div>
+            <div class="step-detail">
+              Click <b>Choose Files</b>, select SDS / MSDS PDFs,
+              then press <b>Process selected files</b>.
+            </div>
+          </div>
+          <div class="step-picto">PDF ➜ Table</div>
+        </div>
+
+        <!-- Step 2 -->
+        <div class="step-card">
+          <div class="step-number">2</div>
+          <div class="step-texts">
+            <div class="step-title">Fill quantity & price</div>
+            <div class="step-detail">
+              In tab <b>To order</b>, edit <b>Quantity</b> and
+              <b>Price</b> for each chemical.
+            </div>
+          </div>
+          <div class="step-picto">Edit</div>
+        </div>
+
+        <!-- Step 3 - SUBMIT -->
+        <div class="step-card">
+          <div class="step-number">3</div>
+          <div class="step-texts">
+            <div class="step-title">Click Submit</div>
+            <div class="step-detail">
+              Click <b>Submit</b> on your line. It becomes lighter
+              so you can see it’s requested. Later, an admin will click <b>Order</b>.
+            </div>
+          </div>
+          <div class="step-picto">Submit</div>
+        </div>
+      </div>
+    </aside>
+
+    <!-- RIGHT: app -->
+    <main class="app-panel">
+      <div class="drop">
+        <input id="fileInput" type="file" multiple accept="application/pdf" />
+        <button id="processBtn" class="btn">Process selected files</button>
+      </div>
+
+      <div class="row">
+        <button id="dlCsv" class="btn">Download CSV (onglet courant)</button>
+        <button id="clear" class="btn">Clear table (onglet courant)</button>
+        <button id="reset" class="btn">Reset saved data</button>
+      </div>
+
+      <div class="row tabs">
+        <button class="btn active" data-tab="toorder"  id="tabTo">To order</button>
+        <button class="btn"        data-tab="ordered"  id="tabOd">Ordered</button>
+        <button class="btn"        data-tab="received" id="tabRc">Received (Template)</button>
+        <button class="btn"        data-tab="archived" id="tabAr">Archived</button>
+      </div>
+
+      <!-- Toggle Admin -->
+      <div class="row" style="justify-content:flex-end; gap:12px; margin-top:0;">
+        <label class="small">
+          <input type="checkbox" id="adminToggle" style="vertical-align:middle; margin-right:6px;">
+          Admin mode (show Order / Received / SLIMS / CSV / Clear / Reset)
+        </label>
+      </div>
+
+      <div id="table"></div>
+
+      <h3>Log</h3>
+      <div id="log" class="log"></div>
+      <div id="diag" class="small" style="margin-top:6px"></div>
+    </main>
+  </div>
+</div>
+
+<script>
+/* ---------- ÉTAT ---------- */
+let currentTab = 'toorder';
+let adminMode = false;
+let rows = JSON.parse(localStorage.getItem('msds_rows_v12') || '[]');
+
+/* ---------- Locations list (for dropdown) ---------- */
+const LOCATION_OPTIONS = [
+  "Ventilated Cupboard Shelf 1",
+  "Ventilated Cupboard Shelf 2",
+  "Ventilated Cupboard Shelf 3",
+  "Ventilated Cupboard Shelf 4",
+  "Ventilated Cupboard Shelf 5",
+  "Ventilated Cupboard Shelf 6",
+  "Locked Cupboard Shelf 1",
+  "Locked Cupboard Shelf 2",
+  "Locked Cupboard Shelf 3",
+  "Locked Cupboard Shelf 4",
+  "Locked Cupboard Shelf 5",
+  "Locked Cupboard Shelf 6",
+  "Cupboard 16-95 Shelf 1",
+  "Cupboard 16-95 Shelf 2",
+  "Cupboard 16-95 Shelf 3",
+  "Cupboard 16-95 Shelf 4",
+  "Cupboard 16-95 Shelf 5",
+  "Cupboard 16-95 Shelf 6",
+  "Cupboard 16-95 Shelf 7",
+  "Cupboard 16-104 Shelf 1",
+  "Cupboard 16-104 Shelf 2",
+  "Cupboard 16-104 Shelf 3",
+  "Cupboard 16-104 Shelf 4",
+  "Cupboard 16-104 Shelf 5",
+  "Cupboard 16-104 Shelf 6",
+  "Shelf Corrosive",
+  "Shelf Inflammable",
+  "Shelf other liquid",
+  "Shelf other solid",
+  "Frigo Chimique",
+  "Freezer -80 °C",
+  "Freezer -20 °C"
+];
+
+function save(){
+  localStorage.setItem('msds_rows_v12', JSON.stringify(rows));
+}
+function log(m){
+  const el = document.getElementById('log');
+  el.textContent += (el.textContent ? '\n' : '') + m;
+  el.scrollTop = el.scrollHeight;
+}
+function diag(){
+  const ok = !!(window.pdfjsLib);
+  const noWorker = window.pdfjsLib ? (pdfjsLib.disableWorker === true) : false;
+  document.getElementById('diag').textContent =
+    'Diagnostics: pdfjs loaded: ' + ok + ' | no-worker: ' + noWorker;
+}
+diag();
+
+/* ---------- HEADERS UI (To order / Ordered) ---------- */
+const HEADERS = [
+  "Chemical.Name","CAS.Number","Hazard.Statements","UN.Code","Storage.Class","Storage.Temperature",
+  "Catalog.Number","MSDS.Link","Reception.Date","Expiry.Date","Quantity","Mass","Volume","Price","Food.Grade","Status","Actions"
+];
+const EDITABLE = new Set([
+  "Chemical.Name","CAS.Number","Hazard.Statements","UN.Code","Storage.Class","Storage.Temperature",
+  "Catalog.Number","MSDS.Link","Reception.Date","Expiry.Date","Quantity","Mass","Volume","Price","Status"
+]);
+
+/* ---------- HEADERS TEMPLATE (Received) ---------- */
+const TEMPLATE_HEADERS = [
+  "Id *",
+  "Owner Group * (grps_groupName)",
+  "Responsible (contact person) * (user_userName)",
+  "Status * (stts_name)",
+  "Chemical hazard statement(s) (rdrc_name)",
+  "Expiry date",
+  "Location (cntn_id)",
+  "CAS number *",
+  "MSDS Address *",
+  "Type (CMR/VDC)",
+  "UN Code",
+  "Actions"
+];
+const TEMPLATE_EDITABLE = new Set([
+  "Id *",
+  "Owner Group * (grps_groupName)",
+  "Responsible (contact person) * (user_userName)",
+  "Expiry date",
+  "Location (cntn_id)",
+  "CAS number *",
+  "MSDS Address *",
+  "Type (CMR/VDC)",
+  "UN Code"
+]);
+
+/* ---------- HEADERS Archived ---------- */
+const ARCHIVED_HEADERS = TEMPLATE_HEADERS.filter(h => h !== "Actions");
+
+/* ---------- Marque & Lien SDS ---------- */
+function detectBrand(text){
+  if(/fluka/i.test(text)) return 'fluka';
+  if(/supelco/i.test(text)) return 'supelco';
+  if(/aldrich/i.test(text)) return 'aldrich';
+  if(/sigma/i.test(text)) return 'sial';
+  if(/merck/i.test(text)) return 'aldrich';
+  return 'aldrich';
+}
+function buildMsdsLink(catalog, brand){
+  const cat = (catalog || '').trim();
+  if(!cat) return '';
+  const seg = (brand || 'aldrich').toLowerCase();
+  return 'https://www.sigmaaldrich.com/CH/en/sds/' + seg + '/' + encodeURIComponent(cat) + '?userType=anonymous';
+}
+
+/* ---------- CAS helpers ---------- */
+function isValidCAS(cas) {
+  const m = cas.match(/^(\d{2,7})-(\d{2})-(\d)$/);
+  if (!m) return false;
+  const body = (m[1] + m[2]).split('').reverse();
+  let sum = 0;
+  for (let i = 0; i < body.length; i++) sum += (i + 1) * parseInt(body[i], 10);
+  return (sum % 10) === parseInt(m[3], 10);
+}
+function bestCasFromDigits(digitsChunk) {
+  let d = String(digitsChunk).replace(/[Oo]/g, '0').replace(/[Il]/g, '1').replace(/\D/g, '');
+  if (d.length < 5) return '';
+  for (let left = 2; left <= 7 && left <= d.length - 3; left++) {
+    const a = d.slice(0, left),
+          b = d.slice(left, left + 2),
+          c = d.slice(left + 2, left + 3);
+    const cas = a + '-' + b + '-' + c;
+    if (isValidCAS(cas)) return cas;
+  }
+  return '';
+}
+function extractCAS(text) {
+  const norm = String(text).replace(/[‐-‒–—−]/g, '-');
+  const reHyph = /\b(\d{2,7})\s*-\s*(\d{2})\s*-\s*(\d)\b/g;
+  let m;
+  while ((m = reHyph.exec(norm)) !== null) {
+    const cas = m[1] + '-' + m[2] + '-' + m[3];
+    if (isValidCAS(cas)) return cas;
+  }
+  const reCtx = /CAS(?:\s*[-:]?\s*(?:No\.?|RN|Number))?\s*[:\-–]?\s*([0-9OIl\-\s]{5,24})(?![0-9OIl-])/ig;
+  let x;
+  while ((x = reCtx.exec(norm)) !== null) {
+    const cas = bestCasFromDigits(x[1]);
+    if (cas) return cas;
+  }
+  const reBlob = /([0-9OIl][0-9OIl\-\s]{3,20})/g;
+  let y;
+  while ((y = reBlob.exec(norm)) !== null) {
+    const cas = bestCasFromDigits(y[1]);
+    if (cas) return cas;
+  }
+  return '';
+}
+
+/* ---------- Product name ---------- */
+const VENDOR_WORDS = /\b(aldrich|sigma[- ]?aldrich|sigma|merck|fluka|supelco|sial|millipore|acros|fisher|thermo|vwr|honeywell|alfa(?:\s*aesar)?|alfa|aesar|tci|loba)\b/i;
+function extractProductName(full, lines) {
+  let m = full.match(/(?:Product\s*name|Nom\s+du\s+produit)\s*[:\-–]\s*([^\n;]+?)(?=\s*(?:Brand\b|CAS\b|EC\b|Index\b|Product\s*(?:No\.?|Number)|Cat(?:alog)?\s*(?:No\.?|Number)|REACH|Company|Supplier|Emergency|Section\b|$))/i);
+  if (m) {
+    const cand = m[1].trim();
+    if (cand && !VENDOR_WORDS.test(cand)) return cand;
+  }
+  for (const ln of lines) {
+    const mm = ln.match(/(?:Product\s*name|Nom\s+du\s+produit)\s*[:\-–]\s*(.+)/i);
+    if (mm) {
+      const cand = mm[1].trim().replace(/\s{2,}.*/, '');
+      if (cand && !VENDOR_WORDS.test(cand)) return cand;
+    }
+  }
+  m = full.match(/1\.\s*1\s*(?:Product\s*identifier|Identification du produit)\s*[:\-–]?\s*([^\n;]+?)(?=\s*(?:1\.\s*2|2\.|Recommended|Brand|CAS|EC|Index|$))/i);
+  if (m) {
+    const cand = m[1].trim();
+    if (cand && !VENDOR_WORDS.test(cand)) return cand;
+  }
+  const STOP = /\b(safety data sheet|msds|sds|section|page \d|version|revision|company|supplier|address|brand|catalog|product number|cas|ec|index)\b/i;
+  for (const ln of lines.slice(0,40)) {
+    const cand = ln.trim();
+    if (cand.length > 3 && /[A-Za-z]/.test(cand) && !VENDOR_WORDS.test(cand) && !STOP.test(cand))
+      return cand;
+  }
+  return '';
+}
+
+/* ---------- UN number ---------- */
+function extractUN(textRaw) {
+  const txt = (textRaw || '').replace(/[‐–—]/g,'-').replace(/\s+/g,' ').trim();
+  const patterns = [
+    /\bUN\s*No\.?\s*[:\-]?\s*(\d{4})\b/i,
+    /\bUN\s*Number\s*[:\-]?\s*(\d{4})\b/i,
+    /\bUN\s*Nr\.?\s*[:\-]?\s*(\d{4})\b/i,
+    /\b(?:UN|ONU)\s*(\d{4})\b/i,
+    /\b(?:ADR\/RID|IMDG|IATA|ICAO)\s*[:\-]?\s*UN?\s*(\d{4})\b/i,
+    /14\.?\s*1\s*(?:UN\s*number|Num[eé]ro\s*ONU|UN-?Nr)\s*[:\-]?\s*(?:ADR\/RID\s*[:\-]?\s*)?(\d{4})\b/i
+  ];
+  for (const re of patterns) {
+    const m = txt.match(re);
+    if (m) return m[1];
+  }
+  const i = txt.search(/14\.?\s*1\b/i);
+  if (i !== -1) {
+    const seg = txt.slice(i, i+220);
+    const m = seg.match(/\b(\d{4})\b/);
+    if (m) return m[1];
+  }
+  return 'NA';
+}
+
+/* ---------- Storage class ---------- */
+function extractStorageClass(text) {
+  const t = String(text || '').replace(/\s+/g, ' ');
+  const patterns = [
+    /Storage\s*class\s*\(TRGS\s*510\)\s*[:\-–]?\s*([0-9A-Za-z.\s]+?:\s*[^.;\n]+)/i,
+    /TRGS\s*510[^:]*:\s*([0-9A-Za-z.\s]+?:\s*[^.;\n]+)/i,
+    /Storage\s*class\s*[:\-–]?\s*([0-9A-Za-z.\s]+?:\s*[^.;\n]+)/i
+  ];
+  for (const re of patterns) {
+    const m = t.match(re);
+    if (m) {
+      let s = m[1].trim();
+      s = s.replace(/\s{2,}/g, ' ');
+      s = s.split(/Aldrich\s*-|Merck\s*operates|Page\s*\d+/i)[0].trim();
+      s = s.replace(/\b(?:7|8)\b\s*$/, '');
+      return s;
+    }
+  }
+  const m2 = t.match(/\b(?:class\s*)?(?:TRGS\s*510\s*)?[:\-–]?\s*(\d{1,2}(?:\.\d+[A-Z]?)?)\b/i);
+  return m2 ? m2[1] : '';
+}
+
+/* ---------- Hazard bucket ---------- */
+function hazardBucket(hazards, storageClass) {
+  const s = ((hazards || '') + ' ' + (storageClass || '')).toLowerCase();
+  if (/\b(6\.?1|toxic|poison|cmr|carcin|mutagen|reprotox|h300|h301|h330|class\s*6)/.test(s)) return 'toxic';
+  if (/\b(3\b|class\s*3|flammable|combustible|h224|h225|h226|class\s*10)\b/.test(s)) return 'flammable';
+  if (/\b(8\b|class\s*8|corrosive|h314|h290)\b/.test(s)) return 'corrosive';
+  return 'other';
+}
+
+/* ---------- State guess & location rules ---------- */
+function guessState(storageClass, hazards, name) {
+  const s = ((storageClass || '') + ' ' + (hazards || '') + ' ' + (name || '')).toLowerCase();
+  if (/\bliquid|liquids|solution|soln|\bsol\.?\b/.test(s)) return 'liquid';
+  if (/\bsolid|powder|crystal|anhydrous|pellet|flake/.test(s)) return 'solid';
+  return 'liquid';
+}
+function hashIndex(seed, n) {
+  let h = 0;
+  const str = seed || 'x';
+  for (let i = 0; i < str.length; i++) {
+    h = ((h << 5) - h) + str.charCodeAt(i);
+    h |= 0;
+  }
+  return Math.abs(h) % n;
+}
+function pickFrom(list, seed) {
+  if (!list || !list.length) return '';
+  return list[hashIndex(seed, list.length)];
+}
+
+function suggestLocation(storageTemp, storageClass, hazards, name, foodGrade) {
+  // For food-grade we don't force a location here (could be different rules later)
+  if ((foodGrade || '').toLowerCase() === 'yes') return '';
+
+  const t       = (storageTemp || '').toLowerCase();
+  const bucket  = hazardBucket(hazards, storageClass);
+  const state   = guessState(storageClass, hazards, name);
+  const seedStr = name || hazards || storageClass || storageTemp || '';
+
+  // Cold storage (kept generic)
+  if (/4\s*°?c|\b2\s*[-–]\s*8\b|fridge|refrigerat|cool/.test(t)) {
+    return 'Frigo Chimique';
+  }
+  if (/(-|\u2212)\s*80/.test(t)) return 'Freezer -80 °C';
+  if (/(-|\u2212)\s*20/.test(t)) return 'Freezer -20 °C';
+
+  // Room temperature, flammable -> Ventilated Cupboard 3–4
+  if (bucket === 'flammable') {
+    const ventilFlam = [
+      'Ventilated Cupboard Shelf 3',
+      'Ventilated Cupboard Shelf 4'
+    ];
+    return pickFrom(ventilFlam, seedStr);
+  }
+
+  // Room temperature, corrosive -> Ventilated Cupboard 5–6
+  if (bucket === 'corrosive') {
+    const ventilCorr = [
+      'Ventilated Cupboard Shelf 5',
+      'Ventilated Cupboard Shelf 6'
+    ];
+    return pickFrom(ventilCorr, seedStr);
+  }
+
+  // Room temperature, toxic -> Locked Cupboard 1–6
+  if (bucket === 'toxic') {
+    const locked = [
+      'Locked Cupboard Shelf 1',
+      'Locked Cupboard Shelf 2',
+      'Locked Cupboard Shelf 3',
+      'Locked Cupboard Shelf 4',
+      'Locked Cupboard Shelf 5',
+      'Locked Cupboard Shelf 6'
+    ];
+    return pickFrom(locked, seedStr);
+  }
+
+  // Room temperature, no risk / other:
+  const cup1695 = [
+    'Cupboard 16-95 Shelf 1',
+    'Cupboard 16-95 Shelf 2',
+    'Cupboard 16-95 Shelf 3',
+    'Cupboard 16-95 Shelf 4',
+    'Cupboard 16-95 Shelf 5',
+    'Cupboard 16-95 Shelf 6',
+    'Cupboard 16-95 Shelf 7'
+  ];
+  const cup16104 = [
+    'Cupboard 16-104 Shelf 1',
+    'Cupboard 16-104 Shelf 2',
+    'Cupboard 16-104 Shelf 3',
+    'Cupboard 16-104 Shelf 4',
+    'Cupboard 16-104 Shelf 5',
+    'Cupboard 16-104 Shelf 6'
+  ];
+
+  if (state === 'liquid') {
+    return pickFrom(cup1695, seedStr);
+  } else {
+    return pickFrom(cup16104, seedStr);
+  }
+}
+
+/* ---------- Type (CMR/VDC) ---------- */
+function deriveTypeCMR(h) {
+  const s = String(h || '').toUpperCase();
+  if (/(H340|H350|H360[A-Z]*)/.test(s)) return "Yes";
+  if (/(H341|H351|H361[A-Z]*)/.test(s)) return "Yes";
+  if (/H362/.test(s)) return "Yes";
+  return "No";
+}
+
+/* ---------- Parse PDF -> row ---------- */
+function parseTextToRow(text){
+  const full  = (text || '').replace(/\s+/g,' ').trim();
+  const lines = (text || '').replace(/\r/g,'\n').split(/\n+/)
+                .map(s=>s.replace(/\s+/g,' ').trim()).filter(Boolean);
+  const brand = detectBrand(full);
+
+  const name = extractProductName(full, lines) || '';
+  const cas  = extractCAS(full);
+  const hazards = Array
+    .from(new Set((full.match(/\bH\d{3}[A-Za-z]*\b/g) || []).map(s => s.toUpperCase())))
+    .sort()
+    .join(', ') || '-- NONE --';
+  const un = extractUN(full);
+  const storageClass = extractStorageClass(full);
+
+  let storageTemp = '';
+  if(/\b(room\s*temperature|standard\s*ambient\s*conditions)\b/i.test(full))
+    storageTemp = 'Room temperature';
+  const mST = full.match(/(?:Storage\s*temperature|Temp[ée]rature\s*de\s*stockage)\s*[:\-–]?\s*([^.;\n]+)/i);
+  if(mST) storageTemp = (mST[1] || storageTemp).trim();
+
+  let catalog = '';
+  const mCat = full.match(/(?:Product\s*(?:No\.|Number)|Cat(?:alog)?\s*(?:No\.|Number))\s*[:\-–]?\s*([A-Z0-9\-]{3,})/i);
+  if(mCat) catalog = mCat[1].trim();
+
+  const link = buildMsdsLink(catalog, brand);
+  const foodGrade = /^W/i.test(catalog) ? 'Yes' : '';
+
+  return {
+    "Chemical.Name": name || '',
+    "CAS.Number": cas || '',
+    "Hazard.Statements": hazards,
+    "UN.Code": un || 'NA',
+    "Storage.Class": storageClass || '',
+    "Storage.Temperature": storageTemp || '',
+    "Catalog.Number": catalog || '',
+    "MSDS.Link": link || '',
+    "Reception.Date": "",
+    "Expiry.Date": "",
+    "Quantity": "",
+    "Mass": "",
+    "Volume": "",
+    "Price": "",
+    "Food.Grade": foodGrade,
+    "Status": "To order",
+    "Submitted": false
+  };
+}
+
+/* ---------- Mapping -> template (Received/Archived) ---------- */
+function mapToTemplate(r){
+  const hazards      = r["Hazard.Statements"] || "";
+  const storageTemp  = r["Storage.Temperature"] || "";
+  const storageClass = r["Storage.Class"] || "";
+  const foodGrade    = (r["Food.Grade"] || "").toLowerCase();
+
+  let loc = r["Location (cntn_id)"] || "";
+  if (!loc && foodGrade !== 'yes') {
+    loc = suggestLocation(storageTemp, storageClass, hazards, r["Chemical.Name"] || "", foodGrade);
+  }
+
+  return {
+    "Id *": r["Id *"] || r["Chemical.Name"] || "",
+    "Owner Group * (grps_groupName)": r["Owner Group * (grps_groupName)"] || "NIFS - Flavor & Perception",
+    "Responsible (contact person) * (user_userName)": r["Responsible (contact person) * (user_userName)"] || "rdrecordqu",
+    "Status * (stts_name)": "Available",
+    "Chemical hazard statement(s) (rdrc_name)": hazards,
+    "Expiry date": r["Expiry date"] || r["Expiry.Date"] || "",
+    "Location (cntn_id)": loc,
+    "CAS number *": r["CAS.Number"] || "",
+    "MSDS Address *": r["MSDS.Link"] || "",
+    "Type (CMR/VDC)": r["Type (CMR/VDC)"] || deriveTypeCMR(hazards),
+    "UN Code": r["UN.Code"] || "NA"
+  };
+}
+
+/* ---------- Admin buttons visibility ---------- */
+function updateButtonsVisibility() {
+  const dl  = document.getElementById('dlCsv');
+  const clr = document.getElementById('clear');
+  const rst = document.getElementById('reset');
+  if (!dl || !clr || !rst) return;
+  dl.style.display  = adminMode ? 'inline-block' : 'none';
+  clr.style.display = adminMode ? 'inline-block' : 'none';
+  rst.style.display = adminMode ? 'inline-block' : 'none';
+}
+
+/* ---------- Rendu table ---------- */
+function render(){
+  document.querySelectorAll('.tabs .btn').forEach(b=>{
+    b.classList.toggle('active', b.dataset.tab === currentTab);
+  });
+
+  updateButtonsVisibility();
+
+  const tbl = document.getElementById('table');
+  const list = rows.map((r,i)=>{ r.__idx = i; return r; }).filter(r=>{
+    const s = (r.Status || '').toLowerCase();
+    if (currentTab === 'toorder')  return s === 'to order';
+    if (currentTab === 'ordered')  return s === 'ordered';
+    if (currentTab === 'received') return s === 'received';
+    if (currentTab === 'archived') return s === 'archived';
+    return false;
+  });
+
+  const headers =
+    currentTab === 'received' ? TEMPLATE_HEADERS :
+    currentTab === 'archived' ? ARCHIVED_HEADERS :
+    HEADERS;
+
+  let html = '<table><thead><tr>';
+  headers.forEach(h => { html += '<th>' + h + '</th>'; });
+  html += '</tr></thead><tbody>';
+
+  list.forEach(r=>{
+    const idx = r.__idx;
+    const typeVal = (r["Type (CMR/VDC)"] || deriveTypeCMR(r["Hazard.Statements"])).toLowerCase();
+    const cmrCls = (typeVal === "yes") ? " cmr" : "";
+    const archCls = (currentTab === "archived") ? " archived-row" : "";
+    const subCls  = r.Submitted ? " submitted-row" : "";
+    html += '<tr class="' + cmrCls + archCls + subCls + '">';
+
+    if (currentTab === 'received' || currentTab === 'archived') {
+      const t = mapToTemplate(r);
+      const hList = (currentTab === 'archived') ? ARCHIVED_HEADERS : TEMPLATE_HEADERS;
+      hList.forEach(h=>{
+        if (h === 'Actions') {
+          html += '<td>' + (adminMode ? '<button class="btn" data-archive="' + idx + '">SLIMS</button>' : '') + '</td>';
+        } else if (h === 'Location (cntn_id)' && currentTab !== 'archived') {
+          // Dropdown with all locations
+          html += '<td><select class="locsel" data-row="' + idx + '" data-key="' + h + '">';
+          html += '<option value=""></option>';
+          LOCATION_OPTIONS.forEach(opt=>{
+            const sel = (t[h] === opt) ? ' selected' : '';
+            html += '<option value="' + opt.replace(/"/g,'&quot;') + '"' + sel + '>' + opt + '</option>';
+          });
+          html += '</select></td>';
+        } else if (TEMPLATE_EDITABLE.has(h) && currentTab !== 'archived') {
+          html += '<td contenteditable data-row="' + idx + '" data-key="' + h + '">' + (t[h] || '') + '</td>';
+        } else {
+          html += '<td>' + (t[h] || '') + '</td>';
+        }
+      });
+    } else {
+      HEADERS.forEach(h=>{
+        if (h === 'Actions') {
+          let btns = '';
+          if (currentTab === 'toorder') {
+            btns += '<button class="btn" data-submit="' + idx + '">Submit</button>';
+            if (adminMode) {
+              btns += ' <button class="btn" data-order="' + idx + '">Order</button>';
+            }
+          } else if (currentTab === 'ordered' && adminMode) {
+            btns = '<button class="btn" data-receive="' + idx + '">Received</button>';
+          }
+          html += '<td>' + btns + '</td>';
+        } else if (h === 'MSDS.Link' && r[h]) {
+          const safe = String(r[h]).replace(/"/g,'%22');
+          html += '<td><a class="link" href="' + safe + '" target="_blank">' + r[h] + '</a></td>';
+        } else if (h === 'Food.Grade') {
+          const val = (r[h] || '').toLowerCase();
+          html += '<td><select class="smallsel" data-row="' + idx + '" data-key="' + h + '">'
+                + '<option value=""></option>'
+                + '<option value="Yes"' + (val==='yes' ? ' selected' : '') + '>Yes</option>'
+                + '<option value="No"'  + (val==='no'  ? ' selected' : '') + '>No</option>'
+                + '</select></td>';
+        } else if (EDITABLE.has(h)) {
+          const need = (currentTab === 'toorder' && (h === 'Quantity' || h === 'Price') && !r[h]);
+          html += '<td contenteditable data-row="' + idx + '" data-key="' + h + '"'
+                + (need ? ' class="need"' : '') + '>' + (r[h] || '') + '</td>';
+        } else {
+          html += '<td>' + (r[h] || '') + '</td>';
+        }
+      });
+    }
+
+    html += '</tr>';
+  });
+
+  html += '</tbody></table>';
+  tbl.innerHTML = html;
+
+  /* Submit (available to all) */
+  tbl.querySelectorAll('button[data-submit]').forEach(b=>{
+    b.addEventListener('click', ()=>{
+      const i = +b.dataset.submit;
+      rows[i].Submitted = true;
+      save(); render();
+    });
+  });
+
+  /* Admin-only actions */
+  tbl.querySelectorAll('button[data-order]').forEach(b=>{
+    b.addEventListener('click', ()=>{
+      if (!adminMode) return;
+      const i = +b.dataset.order;
+      rows[i].Status = 'Ordered';
+      save(); render();
+    });
+  });
+
+  function todayISO(){ return new Date().toISOString().slice(0,10); }
+  function addYearsISO(iso, y){ const d=new Date(iso); d.setFullYear(d.getFullYear()+y); return d.toISOString().slice(0,10); }
+
+  tbl.querySelectorAll('button[data-receive]').forEach(b=>{
+    b.addEventListener('click', ()=>{
+      if (!adminMode) return;
+      const i = +b.dataset.receive;
+      rows[i].Status = 'Received';
+
+      if (!rows[i]["Responsible (contact person) * (user_userName)"])
+        rows[i]["Responsible (contact person) * (user_userName)"] = "rdrecordqu";
+      if (!rows[i]["Owner Group * (grps_groupName)"])
+        rows[i]["Owner Group * (grps_groupName)"] = "NIFS - Flavor & Perception";
+
+      const rec = todayISO(), exp = addYearsISO(rec,5);
+      rows[i]["Reception.Date"] = rec;
+      rows[i]["Expiry.Date"]    = exp;
+
+      save(); render();
+    });
+  });
+
+  tbl.querySelectorAll('button[data-archive]').forEach(b=>{
+    b.addEventListener('click', ()=>{
+      if (!adminMode) return;
+      const i = +b.dataset.archive;
+      rows[i].Status = 'Archived';
+      save(); render();
+    });
+  });
+
+  tbl.querySelectorAll('td[contenteditable]').forEach(td=>{
+    td.addEventListener('blur', ()=>{
+      const i = +td.dataset.row;
+      const k = td.dataset.key;
+      rows[i][k] = td.textContent.trim();
+      if (k === 'Catalog.Number') {
+        rows[i]['MSDS.Link'] = buildMsdsLink(rows[i]['Catalog.Number'], detectBrand(rows[i]['Chemical.Name'] || ''));
+        rows[i]['Food.Grade'] = /^W/i.test(rows[i]['Catalog.Number'] || '') ? 'Yes' : (rows[i]['Food.Grade'] || '');
+      }
+      save(); render();
+    });
+  });
+
+  tbl.querySelectorAll('select.smallsel').forEach(sel=>{
+    sel.addEventListener('change', ()=>{
+      const i = +sel.dataset.row;
+      const k = sel.dataset.key;
+      rows[i][k] = sel.value;
+      save(); render();
+    });
+  });
+
+  tbl.querySelectorAll('select.locsel').forEach(sel=>{
+    sel.addEventListener('change', ()=>{
+      const i = +sel.dataset.row;
+      const k = sel.dataset.key; // "Location (cntn_id)"
+      rows[i][k] = sel.value;
+      save();
+      // no need full re-render, but okay if you want live visual update
+      render();
+    });
+  });
+}
+render();
+
+/* ---------- Onglets ---------- */
+document.getElementById('tabTo').onclick = ()=>{ currentTab='toorder';  render(); };
+document.getElementById('tabOd').onclick = ()=>{ currentTab='ordered';  render(); };
+document.getElementById('tabRc').onclick = ()=>{ currentTab='received'; render(); };
+document.getElementById('tabAr').onclick = ()=>{ currentTab='archived'; render(); };
+
+document.getElementById('adminToggle').addEventListener('change', (e)=>{
+  adminMode = e.target.checked;
+  render();
+});
+
+/* ---------- Clear / Reset ---------- */
+document.getElementById('clear').onclick = ()=>{
+  if (!adminMode) return;
+  rows = rows.filter(r=>{
+    const s=(r.Status||'').toLowerCase();
+    if (currentTab === 'toorder')  return s !== 'to order';
+    if (currentTab === 'ordered')  return s !== 'ordered';
+    if (currentTab === 'received') return s !== 'received';
+    if (currentTab === 'archived') return s !== 'archived';
+    return true;
+  });
+  save(); render();
+};
+document.getElementById('reset').onclick = ()=>{
+  if (!adminMode) return;
+  if (confirm('Delete all saved rows?')) { rows = []; save(); render(); }
+};
+
+/* ---------- Export CSV ---------- */
+document.getElementById('dlCsv').onclick = ()=>{
+  if (!adminMode) return;
+  const list = rows.filter(r=>{
+    const s=(r.Status||'').toLowerCase();
+    if (currentTab === 'toorder')  return s === 'to order';
+    if (currentTab === 'ordered')  return s === 'ordered';
+    if (currentTab === 'received') return s === 'received';
+    if (currentTab === 'archived') return s === 'archived';
+    return false;
+  });
+  if (!list.length) { alert('No rows in current tab.'); return; }
+
+  const cols =
+    currentTab === 'received' ? TEMPLATE_HEADERS.filter(h=>h!=='Actions') :
+    currentTab === 'archived' ? ARCHIVED_HEADERS :
+    HEADERS.filter(h=>h!=='Actions');
+
+  let csv = cols.join(',') + '\n';
+  list.forEach(r=>{
+    const out = (currentTab==='received' || currentTab==='archived') ? mapToTemplate(r) : r;
+    const line = cols.map(h=>{
+      const v = String(out[h] || '').replace(/"/g,'""');
+      return '"' + v + '"';
+    }).join(',');
+    csv += line + '\n';
+  });
+  const blob = new Blob([csv],{type:"text/csv"});
+  const a=document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download='sds_'+currentTab+'.csv';
+  a.click();
+};
+
+/* ---------- Lecture PDF ---------- */
+document.getElementById('processBtn').onclick = async ()=>{
+  const files = Array.from(document.getElementById('fileInput').files || []);
+  log('Process clicked. files=' + files.length);
+  if (!files.length) return;
+  if (!window.pdfjsLib){ log('ERROR: pdfjsLib not found.'); return; }
+
+  for (const f of files){
+    try{
+      log('Reading ' + f.name);
+      const buf = await f.arrayBuffer();
+      const pdf = await pdfjsLib.getDocument({data:buf, isEvalSupported:false, disableFontFace:true}).promise;
+      let full = '';
+      for (let p=1; p<=pdf.numPages; p++){
+        const page = await pdf.getPage(p);
+        const content = await page.getTextContent();
+        full += content.items.map(i=>i.str).join(' ') + '\n';
+      }
+      const row = parseTextToRow(full);
+      rows.push(row);
+      save();
+      render();
+      log('Parsed: ' + (row["Chemical.Name"] || '(no name)'));
+    }catch(e){
+      log('Error ' + (f && f.name ? f.name + ': ' : '') + (e && e.message ? e.message : e));
+      console.error(e);
+    }
+  }
+};
+</script>
+</body>
+</html>
